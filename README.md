@@ -27,7 +27,7 @@
 ### 🏛️ OFFICIAL CITADEL & SUPPORT
 
 > 📢 **Official Channel:** [@LuciferOpenSource](https://t.me/LuciferOpenSource)  
-> 💬 **Support Group:** [@LuciferSupportGroup](https://t.me/LuciferSupportGroup)  
+> 💬 **Support Group:** [@LuciferOpenSourceDiscussionGroup](https://t.me/LuciferOpenSourceDiscussionGroup)  
 > 🍿 **Movie Request Group:** [@RequestLuciferDatabase](https://t.me/RequestLuciferDatabase)  
 > 🌟 **GitHub Repository:** [Auto-Filter-Bot-Lucifer](https://github.com/ailuciferbaba-pixel/Auto-Filter-Bot-Lucifer/)  
 > 👨‍💻 **GitHub Profile:** [ailuciferbaba-pixel](https://github.com/ailuciferbaba-pixel)  
@@ -1213,7 +1213,7 @@ SOFTWARE.
 <br>
 
 [![Official Channel](https://img.shields.io/badge/Telegram-Official_Channel-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/LuciferOpenSource)
-[![Support Group](https://img.shields.io/badge/Telegram-Support_Group-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/LuciferSupportGroup)
+[![Support Group](https://img.shields.io/badge/Telegram-Support_Group-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/LuciferOpenSourceDiscussionGroup)
 [![Request Group](https://img.shields.io/badge/Telegram-Movie_Request_Group-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/RequestLuciferDatabase)
 [![GitHub](https://img.shields.io/badge/GitHub-ailuciferbaba--pixel-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/ailuciferbaba-pixel)
 

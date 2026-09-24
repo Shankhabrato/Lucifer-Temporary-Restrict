@@ -611,27 +611,37 @@ PROMO_LINE_REGEX = re.compile(
     re.IGNORECASE
 )
 
+MD_LINK_PATTERN = re.compile(r'\[([^\]]+)\]\((https?://[^\)]+)\)')
+
 def clean_promotional_hyperlinks(text_html: str) -> str:
     if not text_html:
         return ""
 
-    def replace_link(match):
-        href = match.group(1).strip()
-        anchor = match.group(2).strip()
-
-        is_promo_url = bool(PROMO_DOMAIN_REGEX.search(href))
+    # 1. Unwrap raw markdown links [anchor](url)
+    def replace_md_link(match):
+        anchor = match.group(1).strip()
+        href = match.group(2).strip()
         is_promo_anchor = bool(PROMO_PHRASES_REGEX.search(anchor)) or bool(re.search(r'^@[a-zA-Z0-9_]+$', anchor))
-
-        if is_promo_url or is_promo_anchor:
-            if re.search(r'\.(?:mkv|mp4|webm|avi|zip|rar)(?:\.\d{3})?$', anchor, re.IGNORECASE):
-                return anchor
+        if is_promo_anchor:
             return ""
         return anchor
 
-    cleaned = LINK_PATTERN.sub(replace_link, text_html)
+    text_html = MD_LINK_PATTERN.sub(replace_md_link, text_html)
+
+    # 2. Unwrap HTML links <a href="url">anchor</a>
+    def replace_html_link(match):
+        href = match.group(1).strip()
+        anchor = match.group(2).strip()
+        is_promo_anchor = bool(PROMO_PHRASES_REGEX.search(anchor)) or bool(re.search(r'^@[a-zA-Z0-9_]+$', anchor))
+        if is_promo_anchor:
+            return ""
+        return anchor
+
+    cleaned = LINK_PATTERN.sub(replace_html_link, text_html)
     cleaned = PROMO_DOMAIN_REGEX.sub("", cleaned)
     cleaned = re.sub(r'(?i)\b(?:join|link|channel|backup channel|official channel)\s*:\s*', '', cleaned)
     return cleaned
+
 
 
 def clean_promotional_names(text: str) -> str:

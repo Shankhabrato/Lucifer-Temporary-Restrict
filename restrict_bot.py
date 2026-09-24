@@ -702,6 +702,7 @@ def smart_caption(text_html, file_size_bytes=0):
     # 1. Remove existing footer if retried/fallback to prevent duplication
     text_html = re.sub(r'\n*\s*💾\s*Size:[^\n]*', '', text_html, flags=re.IGNORECASE)
     text_html = re.sub(r'\n*\s*🔗\s*Join\s*@luciferdatabase[^\n]*', '', text_html, flags=re.IGNORECASE)
+    text_html = text_html.strip()
 
     # 2. Safely extract trailing true extension & split-suffix preserving HTML tags
     stem, ext, split_suffix, closing_tags = parse_media_extension_and_split(text_html)
@@ -2813,8 +2814,18 @@ async def handle_private(client: Client, acc, message: Message, chatid, msgid: i
                             except: pass
         return True, "success"
 
+    original_filename = "unknown_file"
+    if getattr(msg, "document", None) and getattr(msg.document, "file_name", None): original_filename = msg.document.file_name
+    elif getattr(msg, "video", None) and getattr(msg.video, "file_name", None): original_filename = msg.video.file_name
+    elif getattr(msg, "audio", None) and getattr(msg.audio, "file_name", None): original_filename = msg.audio.file_name
+
+    has_dotted_ext = bool(re.search(r'\.[a-zA-Z0-9]{2,4}(?:\.\d{2,4})?$', original_filename))
+    auto_dl = await db.get_dl_status()
+
     # 🚀 FAST FORWARD EXACT CLONE WITH CAPTION REPLACEMENT
-    if not is_restricted and not getattr(msg, "has_protected_content", False) and not getattr(msg.chat, "has_protected_content", False):
+    # If auto_dl is ON and file lacks a dotted extension, bypass fast-copy so we download & rename the actual Telegram document for Stremio!
+    allow_fast_copy = (not is_restricted and not getattr(msg, "has_protected_content", False) and not getattr(msg.chat, "has_protected_content", False))
+    if allow_fast_copy and (not auto_dl or has_dotted_ext or msg_type not in ["Document", "Video", "Audio"]):
         forward_success = False
         for dest in targets:
             dest_chat_id = dest['dest_id']
@@ -2850,7 +2861,6 @@ async def handle_private(client: Client, acc, message: Message, chatid, msgid: i
         if forward_success: return True, "success"
 
     # 🌟 DOWNLOAD TOGGLE SAFETY CHECK
-    auto_dl = await db.get_dl_status()
     if not auto_dl:
         if msg_type in ["Video", "Document"]:
             chat_title = getattr(msg.chat, "title", None) or str(chatid)
@@ -2860,11 +2870,6 @@ async def handle_private(client: Client, acc, message: Message, chatid, msgid: i
     task_folder_path = Path(f"./downloads/{user_id}/{task_uuid}/{msgid}/")
     task_folder_path.mkdir(parents=True, exist_ok=True)
 
-    # 🚀 RETAIN ORIGINAL FILE NAME ON DISK (File name downloading doesn't break formatting)
-    original_filename = "unknown_file"
-    if getattr(msg, "document", None) and getattr(msg.document, "file_name", None): original_filename = msg.document.file_name
-    elif getattr(msg, "video", None) and getattr(msg.video, "file_name", None): original_filename = msg.video.file_name
-    
     safe_filename = sanitize_filename(original_filename)
     if not safe_filename.strip(): safe_filename = f"{msgid}.dat"
     file_path_to_save = task_folder_path / safe_filename
@@ -2965,10 +2970,10 @@ async def handle_private(client: Client, acc, message: Message, chatid, msgid: i
                     while retry_count < 5: 
                         if task_uuid and CANCEL_FLAGS.get(task_uuid): break
                         try:
-                            # 🚀 EXACT UPLOAD CLONE WITH CLEAN CAPTION
-                            if "Document" == msg_type: await uploader.send_document(dest_chat_id, file_path, thumb=ph_path, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup, reply_to_message_id=dest_thread_id, progress=progress, progress_args=[task_uuid,"up"])
-                            elif "Video" == msg_type: await uploader.send_video(dest_chat_id, file_path, duration=getattr(msg.video, 'duration', 0), width=getattr(msg.video, 'width', 0), height=getattr(msg.video, 'height', 0), thumb=ph_path, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup, reply_to_message_id=dest_thread_id, progress=progress, progress_args=[task_uuid,"up"])
-                            elif "Audio" == msg_type: await uploader.send_audio(dest_chat_id, file_path, thumb=ph_path, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup, reply_to_message_id=dest_thread_id, progress=progress, progress_args=[task_uuid,"up"])
+                            # 🚀 EXACT UPLOAD CLONE WITH CLEAN CAPTION AND DOTTED FILENAME
+                            if "Document" == msg_type: await uploader.send_document(dest_chat_id, file_path, thumb=ph_path, caption=clean_caption, file_name=safe_filename, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup, reply_to_message_id=dest_thread_id, progress=progress, progress_args=[task_uuid,"up"])
+                            elif "Video" == msg_type: await uploader.send_video(dest_chat_id, file_path, duration=getattr(msg.video, 'duration', 0), width=getattr(msg.video, 'width', 0), height=getattr(msg.video, 'height', 0), thumb=ph_path, caption=clean_caption, file_name=safe_filename, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup, reply_to_message_id=dest_thread_id, progress=progress, progress_args=[task_uuid,"up"])
+                            elif "Audio" == msg_type: await uploader.send_audio(dest_chat_id, file_path, thumb=ph_path, caption=clean_caption, file_name=safe_filename, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup, reply_to_message_id=dest_thread_id, progress=progress, progress_args=[task_uuid,"up"])
                             elif "Photo" == msg_type: await uploader.send_photo(dest_chat_id, file_path, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup, reply_to_message_id=dest_thread_id)
                             elif "Voice" == msg_type: await uploader.send_voice(dest_chat_id, file_path, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup, reply_to_message_id=dest_thread_id, progress=progress, progress_args=[task_uuid,"up"])
                             elif "Animation" == msg_type: await uploader.send_animation(dest_chat_id, file_path, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup, reply_to_message_id=dest_thread_id)
@@ -3130,51 +3135,63 @@ async def process_watcher_message(client, message):
 
             clean_caption = append_media_footer(clean_caption, media_file_size)
 
-            for t in targets:
-                success = False
-                dest_id = t['dest_id']
-                dest_thread = t.get('dest_thread')
-                
-                # 🚀 EXACT MEDIA WATCHER FAST FORWARD CLONE
-                try: 
-                    await app.copy_message(chat_id=dest_id, from_chat_id=safe_source_id, message_id=message.id, reply_to_message_id=dest_thread, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=message.reply_markup)
-                    success = True
-                except Exception as e1:
-                    if "CAPTION_TOO_LONG" in str(e1):
-                        try:
-                            fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
-                            await app.copy_message(chat_id=dest_id, from_chat_id=safe_source_id, message_id=message.id, reply_to_message_id=dest_thread, caption=fallback_cap, reply_markup=message.reply_markup)
-                            success = True
-                            continue
-                        except: pass
-                    try:
-                        await client.get_chat(dest_id)
-                    except Exception:
-                        pass
+            original_filename = "unknown_file"
+            if getattr(message, "document", None) and getattr(message.document, "file_name", None): original_filename = message.document.file_name
+            elif getattr(message, "video", None) and getattr(message.video, "file_name", None): original_filename = message.video.file_name
+            elif getattr(message, "audio", None) and getattr(message.audio, "file_name", None): original_filename = message.audio.file_name
 
+            has_dotted_ext = bool(re.search(r'\.[a-zA-Z0-9]{2,4}(?:\.\d{2,4})?$', original_filename))
+            auto_dl = await db.get_dl_status()
+
+            fallback_to_download = False
+            if auto_dl and not has_dotted_ext and msg_type in ["Document", "Video", "Audio"]:
+                fallback_to_download = True
+            else:
+                for t in targets:
+                    success = False
+                    dest_id = t['dest_id']
+                    dest_thread = t.get('dest_thread')
+                    
+                    # 🚀 EXACT MEDIA WATCHER FAST FORWARD CLONE
                     try: 
-                        await client.copy_message(chat_id=dest_id, from_chat_id=chat_id, message_id=message.id, reply_to_message_id=dest_thread, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=message.reply_markup)
+                        await app.copy_message(chat_id=dest_id, from_chat_id=safe_source_id, message_id=message.id, reply_to_message_id=dest_thread, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=message.reply_markup)
                         success = True
-                    except Exception as e2:
-                        if "CAPTION_TOO_LONG" in str(e2):
+                    except Exception as e1:
+                        if "CAPTION_TOO_LONG" in str(e1):
                             try:
                                 fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
-                                await client.copy_message(chat_id=dest_id, from_chat_id=chat_id, message_id=message.id, reply_to_message_id=dest_thread, caption=fallback_cap, reply_markup=message.reply_markup)
+                                await app.copy_message(chat_id=dest_id, from_chat_id=safe_source_id, message_id=message.id, reply_to_message_id=dest_thread, caption=fallback_cap, reply_markup=message.reply_markup)
                                 success = True
                                 continue
                             except: pass
                         try:
-                            await client.forward_messages(chat_id=dest_id, from_chat_id=chat_id, message_ids=message.id, message_thread_id=dest_thread)
+                            await client.get_chat(dest_id)
+                        except Exception:
+                            pass
+
+                        try: 
+                            await client.copy_message(chat_id=dest_id, from_chat_id=chat_id, message_id=message.id, reply_to_message_id=dest_thread, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=message.reply_markup)
                             success = True
-                        except Exception as e3:
-                            if LOG_CHANNEL:
+                        except Exception as e2:
+                            if "CAPTION_TOO_LONG" in str(e2):
                                 try:
-                                    log_chat = int(LOG_CHANNEL.split("/")[0]) if "/" in LOG_CHANNEL else int(LOG_CHANNEL)
-                                    await app.send_message(log_chat, f"❌ **Fast-Copy Failed!**\nSource: `{chat_id}`\nDest: `{dest_id}`\nError: `{e3}`")
+                                    fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
+                                    await client.copy_message(chat_id=dest_id, from_chat_id=chat_id, message_id=message.id, reply_to_message_id=dest_thread, caption=fallback_cap, reply_markup=message.reply_markup)
+                                    success = True
+                                    continue
                                 except: pass
-                
-                if not success:
-                    fallback_to_download = True
+                            try:
+                                await client.forward_messages(chat_id=dest_id, from_chat_id=chat_id, message_ids=message.id, message_thread_id=dest_thread)
+                                success = True
+                            except Exception as e3:
+                                if LOG_CHANNEL:
+                                    try:
+                                        log_chat = int(LOG_CHANNEL.split("/")[0]) if "/" in LOG_CHANNEL else int(LOG_CHANNEL)
+                                        await app.send_message(log_chat, f"❌ **Fast-Copy Failed!**\nSource: `{chat_id}`\nDest: `{dest_id}`\nError: `{e3}`")
+                                    except: pass
+                    
+                    if not success:
+                        fallback_to_download = True
 
         if not fallback_to_download:
             return 

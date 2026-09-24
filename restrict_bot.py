@@ -34,16 +34,33 @@ class LoggerWriter:
         self.terminal = sys.stderr if is_stderr else sys.stdout
         self.log = open("bot.log", "a", encoding="utf-8")
     def write(self, message):
-        self.terminal.write(message)
-        self.log.write(message)
-        self.log.flush()
+        try:
+            self.terminal.write(message)
+        except Exception:
+            try:
+                enc = getattr(self.terminal, 'encoding', 'utf-8') or 'utf-8'
+                self.terminal.write(message.encode(enc, errors='replace').decode(enc))
+            except Exception:
+                pass
+        try:
+            self.log.write(message)
+            self.log.flush()
+        except Exception:
+            pass
     def flush(self):
-        self.terminal.flush()
-        self.log.flush()
+        try:
+            self.terminal.flush()
+        except Exception:
+            pass
+        try:
+            self.log.flush()
+        except Exception:
+            pass
 
 # Redirect all prints and tracebacks to bot.log as well as the console
 sys.stdout = LoggerWriter(is_stderr=False)
 sys.stderr = LoggerWriter(is_stderr=True)
+
 
 # ==============================================================================
 # --- CONFIGURATION ---
@@ -515,28 +532,39 @@ ALL_MEDIA_EXTS = UNAMBIGUOUS_EXTS + r'|' + DELIMITED_ONLY_EXTS
 
 # 1. Match split files (.001, .002, etc.) for ANY known extension, even if glued to letters/domains (e.g. Commkv.001)
 SPLIT_EXT_REGEX = re.compile(
-    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_>\'\"a-zA-Z0-9]))(?P<ext>' + ALL_MEDIA_EXTS + r')(?P<split>\.\d{2,4})(\s*(?:</[^>]+>)*\s*)$',
+    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_>\'\"a-zA-Z0-9]))(?P<ext>' + ALL_MEDIA_EXTS + r')(?P<split>\.\d{2,4})(?P<closing>\s*(?:</[^>]+>)*\s*)$',
     re.IGNORECASE
 )
 
 # 2. Match ANY extension preceded by dot, space, underscore, hyphen, or bracket/quote
 # E.g. .mkv,  mkv, _mkv, -mkv, ]mkv, .avi,  avi, .ts,  ts, .mp4,  mp4
 DELIM_EXT_REGEX = re.compile(
-    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_>\'\"]))(?P<ext>' + ALL_MEDIA_EXTS + r')(\s*(?:</[^>]+>)*\s*)$',
+    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_>\'\"]))(?P<ext>' + ALL_MEDIA_EXTS + r')(?P<closing>\s*(?:</[^>]+>)*\s*)$',
     re.IGNORECASE
 )
 
 # 3. Match unambiguous extensions even if glued directly to promo domain or letters (e.g. Commkv, Bollyflixmp4)
 UNAMBIGUOUS_TAIL_REGEX = re.compile(
-    r'^(?P<stem>.*?)(?P<ext>' + UNAMBIGUOUS_EXTS + r')(\s*(?:</[^>]+>)*\s*)$',
+    r'^(?P<stem>.*?)(?P<ext>' + UNAMBIGUOUS_EXTS + r')(?P<closing>\s*(?:</[^>]+>)*\s*)$',
     re.IGNORECASE
 )
 
 # 4. Generic fallback with dot
 GENERIC_EXT_REGEX = re.compile(
-    r'^(?P<stem>.*?)(?P<ext>\.[a-zA-Z][a-zA-Z0-9]{1,4})(?P<split>\.\d{2,4})?(\s*(?:</[^>]+>)*\s*)$',
+    r'^(?P<stem>.*?)(?P<ext>\.[a-zA-Z][a-zA-Z0-9]{1,4})(?P<split>\.\d{2,4})?(?P<closing>\s*(?:</[^>]+>)*\s*)$',
     re.IGNORECASE
 )
+
+def balance_html_tags(html: str) -> str:
+    if not html:
+        return ""
+    tags = ['b', 'i', 'code', 'u', 's', 'pre']
+    for tag in tags:
+        open_count = len(re.findall(rf'<{tag}\b[^>]*>', html, re.IGNORECASE))
+        close_count = len(re.findall(rf'</{tag}>', html, re.IGNORECASE))
+        if open_count > close_count:
+            html += f"</{tag}>" * (open_count - close_count)
+    return html
 
 def parse_media_extension_and_split(text: str):
     m = SPLIT_EXT_REGEX.search(text)
@@ -552,7 +580,7 @@ def parse_media_extension_and_split(text: str):
         if ext and not ext.startswith("."):
             ext = "." + ext.lower()
         split = m.groupdict().get("split") or ""
-        closing = m.groups()[-1] if len(m.groups()) >= 4 and m.groups()[-1] else ""
+        closing = m.groupdict().get("closing") or ""
         if stem:
             # Strip trailing promotional domain residue from stem (e.g. .Com, .in, .org)
             stem = re.sub(r'(?i)\.(?:com|in|to|org|net|me|xyz|site|club|app|top|biz|info|cc)$', '', stem)
@@ -561,6 +589,7 @@ def parse_media_extension_and_split(text: str):
 
 # Quality regex: 2160p, 1080p, 720p, 480p, 360p, 1440p, 4k, 8k
 QUALITY_REGEX = re.compile(r'\b(2160p|1080p|720p|480p|360p|1440p|4k|8k)\b', re.IGNORECASE)
+
 
 # Hyperlink & domain regex for caption cleaning
 LINK_PATTERN = re.compile(r'<a\s+[^>]*href=[\'"]([^\'"]+)[\'"][^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
@@ -692,6 +721,38 @@ def sanitize_filename(filename: str) -> str:
     final_name = re.sub(r' {2,}', ' ', final_name).strip()
     return final_name
 
+def _process_media_line(line_html: str) -> tuple[str, bool]:
+    stem, ext, split_suffix, closing_tags = parse_media_extension_and_split(line_html)
+    if not ext:
+        return line_html, False
+
+    line_stem = stem.replace('_', ' ')
+    line_stem = clean_promotional_names(line_stem)
+
+    while True:
+        old_stem = line_stem
+        line_stem = re.sub(r'^((?:<[^>]+>)*\s*)@[a-zA-Z0-9_]+(\s*)', r'\1', line_stem)
+        m_lead = re.match(r'^((?:<[^>]+>)*\s*)(?:\[(.*?)\]|\((.*?)\))(\s*)', line_stem)
+        if m_lead:
+            bracket_content = m_lead.group(2) or m_lead.group(3) or ""
+            if re.match(r'^(?:S\d+|E\d+|S\d+E\d+|Season\s*\d+|Episode\s*\d+|\d{4}|Hindi|English|Tamil|Telugu|Dual\s*Audio|Multi\s*Audio|HEVC|H\.?265|H\.?264|AAC|DDP|x264|x265|2160p|1080p|720p|480p|4K|8K)$', bracket_content.strip(), re.IGNORECASE):
+                pass
+            else:
+                line_stem = line_stem[:m_lead.start()] + m_lead.group(1) + line_stem[m_lead.end():]
+        if old_stem == line_stem:
+            break
+
+    line_stem = re.sub(r'(@[a-zA-Z0-9_]+)(\s*(?:</[^>]+>)*\s*)$', r'\2', line_stem)
+
+    if not QUALITY_REGEX.search(line_stem) and ext:
+        line_stem = line_stem.rstrip(' .-')
+        line_stem += " 720p"
+
+    line_stem = line_stem.rstrip(' .-')
+    final_line = f"{line_stem}{ext}{split_suffix}{closing_tags}"
+    final_line = re.sub(r' {2,}', ' ', final_line).strip()
+    return final_line, True
+
 # 🚀 SMART CAPTION LOGIC
 def smart_caption(text_html, file_size_bytes=0):
     if not text_html: return ""
@@ -704,54 +765,38 @@ def smart_caption(text_html, file_size_bytes=0):
     text_html = re.sub(r'\n*\s*🔗\s*Join\s*@luciferdatabase[^\n]*', '', text_html, flags=re.IGNORECASE)
     text_html = text_html.strip()
 
-    # 2. Safely extract trailing true extension & split-suffix preserving HTML tags
-    stem, ext, split_suffix, closing_tags = parse_media_extension_and_split(text_html)
-    if ext:
-        text_html = stem
-    else:
-        ext = ""
-        split_suffix = ""
-        closing_tags = ""
+    # 2. Process multiline captions preserving formatting
+    lines = text_html.split('\n')
+    transformed = False
 
-    # 3. Replace all underscores with spaces
-    text_html = text_html.replace('_', ' ')
-
-    # 4. Remove known promotional website/channel names
-    text_html = clean_promotional_names(text_html)
-
-    # 5. Strip starting brackets/tags and starting @usernames recursively (protecting media metadata)
-    while True:
-        old_text = text_html
-        text_html = re.sub(r'^((?:<[^>]+>)*\s*)@[a-zA-Z0-9_]+(\s*)', r'\1', text_html)
-        m_lead = re.match(r'^((?:<[^>]+>)*\s*)(?:\[(.*?)\]|\((.*?)\))(\s*)', text_html)
-        if m_lead:
-            bracket_content = m_lead.group(2) or m_lead.group(3) or ""
-            if re.match(r'^(?:S\d+|E\d+|S\d+E\d+|Season\s*\d+|Episode\s*\d+|\d{4}|Hindi|English|Tamil|Telugu|Dual\s*Audio|Multi\s*Audio|HEVC|H\.?265|H\.?264|AAC|DDP|x264|x265|2160p|1080p|720p|480p|4K|8K)$', bracket_content.strip(), re.IGNORECASE):
-                pass
-            else:
-                text_html = text_html[:m_lead.start()] + m_lead.group(1) + text_html[m_lead.end():]
-        if old_text == text_html:
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        new_line, ok = _process_media_line(stripped)
+        if ok:
+            leading = line[:len(line) - len(line.lstrip())]
+            lines[i] = leading + new_line
+            transformed = True
             break
-            
-    # 6. Remove trailing @username at the very end of the text
-    text_html = re.sub(r'(@[a-zA-Z0-9_]+)(\s*(?:</[^>]+>)*\s*)$', r'\2', text_html)
-    
-    # 7. Add 720p safely if no quality tag exists (inserted immediately before true extension)
-    if not QUALITY_REGEX.search(text_html) and ext:
-        text_html = text_html.rstrip(' .-')
-        text_html += " 720p"
 
-    # 8. Re-attach true extension, split suffix, and closing tags
-    text_html = text_html.rstrip(' .-') + ext + split_suffix + closing_tags
-        
-    # 9. Clean double spaces
-    text_html = re.sub(r' {2,}', ' ', text_html).strip()
+    if not transformed:
+        new_text, ok = _process_media_line(text_html)
+        if ok:
+            lines = [new_text]
+        else:
+            lines = [clean_promotional_names(l.replace('_', ' ')) for l in lines]
+
+    result = '\n'.join(lines)
+    result = re.sub(r' {2,}', ' ', result).strip()
+    result = balance_html_tags(result)
     
-    # 10. Append footer if file size provided
+    # 3. Append footer if file size provided
     if file_size_bytes > 0:
-        text_html = append_media_footer(text_html, file_size_bytes)
+        result = append_media_footer(result, file_size_bytes)
         
-    return text_html
+    return result
+
 
 async def check_link_restriction(user_id, link_text):
     clean_text = link_text.replace("https://", "").replace("http://", "").replace("t.me/", "").replace("c/", "")
@@ -2834,13 +2879,12 @@ async def handle_private(client: Client, acc, message: Message, chatid, msgid: i
                 await client.copy_message(chat_id=dest_chat_id, from_chat_id=chatid, message_id=msgid, reply_to_message_id=dest_thread_id, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup)
                 forward_success = True
             except Exception as e1:
-                if "CAPTION_TOO_LONG" in str(e1):
-                    try:
-                        fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
-                        await client.copy_message(chat_id=dest_chat_id, from_chat_id=chatid, message_id=msgid, reply_to_message_id=dest_thread_id, caption=fallback_cap, reply_markup=msg.reply_markup)
-                        forward_success = True
-                        continue
-                    except: pass
+                try:
+                    fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
+                    await client.copy_message(chat_id=dest_chat_id, from_chat_id=chatid, message_id=msgid, reply_to_message_id=dest_thread_id, caption=fallback_cap, reply_markup=msg.reply_markup)
+                    forward_success = True
+                    continue
+                except: pass
                 try:
                     await acc.copy_message(chat_id=dest_chat_id, from_chat_id=chatid, message_id=msgid, reply_to_message_id=dest_thread_id, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup)
                     forward_success = True
@@ -2849,14 +2893,11 @@ async def handle_private(client: Client, acc, message: Message, chatid, msgid: i
                     await acc.copy_message(chat_id=dest_chat_id, from_chat_id=chatid, message_id=msgid, reply_to_message_id=dest_thread_id, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup)
                     forward_success = True
                 except Exception as e2:
-                    if "CAPTION_TOO_LONG" in str(e2):
-                        try:
-                            fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
-                            await acc.copy_message(chat_id=dest_chat_id, from_chat_id=chatid, message_id=msgid, reply_to_message_id=dest_thread_id, caption=fallback_cap, reply_markup=msg.reply_markup)
-                            forward_success = True
-                        except:
-                            print(f"Task Fast-Copy blocked: {e2}")
-                    else:
+                    try:
+                        fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
+                        await acc.copy_message(chat_id=dest_chat_id, from_chat_id=chatid, message_id=msgid, reply_to_message_id=dest_thread_id, caption=fallback_cap, reply_markup=msg.reply_markup)
+                        forward_success = True
+                    except:
                         print(f"Task Fast-Copy blocked: {e2}")
         if forward_success: return True, "success"
 
@@ -2952,8 +2993,26 @@ async def handle_private(client: Client, acc, message: Message, chatid, msgid: i
                 await asyncio.sleep(5)
 
         if down_task and not down_task.done(): down_task.cancel()
-        if not download_success: return False, "failed"
+        if not download_success:
+            if allow_fast_copy:
+                for dest in targets:
+                    dest_chat_id = dest['dest_id']
+                    dest_thread_id = dest.get('dest_thread')
+                    try:
+                        await client.copy_message(chat_id=dest_chat_id, from_chat_id=chatid, message_id=msgid, reply_to_message_id=dest_thread_id, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=msg.reply_markup)
+                        download_success = True
+                    except Exception:
+                        try:
+                            fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
+                            await client.copy_message(chat_id=dest_chat_id, from_chat_id=chatid, message_id=msgid, reply_to_message_id=dest_thread_id, caption=fallback_cap, reply_markup=msg.reply_markup)
+                            download_success = True
+                        except Exception:
+                            pass
+                if download_success:
+                    return True, "success"
+            return False, "failed"
         if task_uuid and CANCEL_FLAGS.get(task_uuid): return False, "cancelled"
+
 
         up_task = asyncio.create_task(upstatus(client, status_message, chat_for_status, index, total_count, header_text, task_uuid, user_id))
         
@@ -3157,13 +3216,12 @@ async def process_watcher_message(client, message):
                         await app.copy_message(chat_id=dest_id, from_chat_id=safe_source_id, message_id=message.id, reply_to_message_id=dest_thread, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=message.reply_markup)
                         success = True
                     except Exception as e1:
-                        if "CAPTION_TOO_LONG" in str(e1):
-                            try:
-                                fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
-                                await app.copy_message(chat_id=dest_id, from_chat_id=safe_source_id, message_id=message.id, reply_to_message_id=dest_thread, caption=fallback_cap, reply_markup=message.reply_markup)
-                                success = True
-                                continue
-                            except: pass
+                        try:
+                            fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
+                            await app.copy_message(chat_id=dest_id, from_chat_id=safe_source_id, message_id=message.id, reply_to_message_id=dest_thread, caption=fallback_cap, reply_markup=message.reply_markup)
+                            success = True
+                            continue
+                        except: pass
                         try:
                             await client.get_chat(dest_id)
                         except Exception:
@@ -3173,17 +3231,17 @@ async def process_watcher_message(client, message):
                             await client.copy_message(chat_id=dest_id, from_chat_id=chat_id, message_id=message.id, reply_to_message_id=dest_thread, caption=clean_caption, parse_mode=enums.ParseMode.HTML, reply_markup=message.reply_markup)
                             success = True
                         except Exception as e2:
-                            if "CAPTION_TOO_LONG" in str(e2):
-                                try:
-                                    fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
-                                    await client.copy_message(chat_id=dest_id, from_chat_id=chat_id, message_id=message.id, reply_to_message_id=dest_thread, caption=fallback_cap, reply_markup=message.reply_markup)
-                                    success = True
-                                    continue
-                                except: pass
+                            try:
+                                fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
+                                await client.copy_message(chat_id=dest_id, from_chat_id=chat_id, message_id=message.id, reply_to_message_id=dest_thread, caption=fallback_cap, reply_markup=message.reply_markup)
+                                success = True
+                                continue
+                            except: pass
                             try:
                                 await client.forward_messages(chat_id=dest_id, from_chat_id=chat_id, message_ids=message.id, message_thread_id=dest_thread)
                                 success = True
                             except Exception as e3:
+
                                 if LOG_CHANNEL:
                                     try:
                                         log_chat = int(LOG_CHANNEL.split("/")[0]) if "/" in LOG_CHANNEL else int(LOG_CHANNEL)

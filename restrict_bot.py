@@ -677,13 +677,14 @@ def append_media_footer(caption: str, file_size_bytes: int = 0) -> str:
     # Strip any pre-existing footer to prevent duplication across retries/fallbacks/targets
     caption = re.sub(r'\n*\s*💾\s*Size:[^\n]*', '', caption, flags=re.IGNORECASE)
     caption = re.sub(r'\n*\s*🔗\s*Join\s*@luciferdatabase[^\n]*', '', caption, flags=re.IGNORECASE)
+    caption = re.sub(r'\n*\s*⚜️\s*Powered\s*By\s*:\s*\[?\s*@luciferdatabase\s*\]?[^\n]*', '', caption, flags=re.IGNORECASE)
     caption = caption.strip()
 
     if file_size_bytes > 0:
         size_str = format_file_size(file_size_bytes)
-        footer = f"\n\n💾 Size: {size_str}\n\n🔗 Join @luciferdatabase"
+        footer = f"\n\n💾 Size: {size_str}\n\n⚜️ Powered By : [@luciferdatabase]"
     else:
-        footer = f"\n\n🔗 Join @luciferdatabase"
+        footer = f"\n\n⚜️ Powered By : [@luciferdatabase]"
 
     # Enforce Telegram 1024-character caption limit
     if len(caption) + len(footer) > 1024:
@@ -695,8 +696,10 @@ def append_media_footer(caption: str, file_size_bytes: int = 0) -> str:
 def prepare_caption_fallback(caption: str, file_size_bytes: int = 0) -> str:
     caption = re.sub(r'\n*\s*💾\s*Size:[^\n]*', '', caption, flags=re.IGNORECASE)
     caption = re.sub(r'\n*\s*🔗\s*Join\s*@luciferdatabase[^\n]*', '', caption, flags=re.IGNORECASE)
+    caption = re.sub(r'\n*\s*⚜️\s*Powered\s*By\s*:\s*\[?\s*@luciferdatabase\s*\]?[^\n]*', '', caption, flags=re.IGNORECASE)
     plain = re.sub(r'<[^>]+>', '', caption).strip()
     return append_media_footer(plain, file_size_bytes)
+
 
 def sanitize_filename(filename: str) -> str:
     if not filename: return "unnamed_file.dat"
@@ -781,6 +784,7 @@ def smart_caption(text_html, file_size_bytes=0):
     # 1. Remove existing footer if retried/fallback to prevent duplication
     text_html = re.sub(r'\n*\s*💾\s*Size:[^\n]*', '', text_html, flags=re.IGNORECASE)
     text_html = re.sub(r'\n*\s*🔗\s*Join\s*@luciferdatabase[^\n]*', '', text_html, flags=re.IGNORECASE)
+    text_html = re.sub(r'\n*\s*⚜️\s*Powered\s*By\s*:\s*\[?\s*@luciferdatabase\s*\]?[^\n]*', '', text_html, flags=re.IGNORECASE)
     text_html = text_html.strip()
 
     # 2. Process multiline captions preserving formatting

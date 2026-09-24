@@ -510,29 +510,30 @@ def _build_promo_regex():
 PROMO_NAME_REGEX = _build_promo_regex()
 
 UNAMBIGUOUS_EXTS = r'mkv|mp4|webm|m4v|flv|wmv|m4a|flac|7z'
-OTHER_EXTS = r'avi|ts|avc|mp3|aac|wav|opus|ogg|zip|rar|tar|iso|apk|pdf'
-ALL_KNOWN_MEDIA_EXTS = UNAMBIGUOUS_EXTS + r'|' + OTHER_EXTS
+DELIMITED_ONLY_EXTS = r'avi|ts|avc|mp3|aac|wav|opus|ogg|zip|rar|tar|iso|apk|pdf'
+ALL_MEDIA_EXTS = UNAMBIGUOUS_EXTS + r'|' + DELIMITED_ONLY_EXTS
 
-# 1. Matches with numeric split suffix like .001, .002 even if glued to words/promo (e.g. Commkv.001, ]mkv.001)
+# 1. Match split files (.001, .002, etc.) for ANY known extension, even if glued to letters/domains (e.g. Commkv.001)
 SPLIT_EXT_REGEX = re.compile(
-    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_>\'\"a-zA-Z0-9]))(?P<ext>' + ALL_KNOWN_MEDIA_EXTS + r')(?P<split>\.\d{2,4})(\s*(?:</[^>]+>)*\s*)$',
+    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_>\'\"a-zA-Z0-9]))(?P<ext>' + ALL_MEDIA_EXTS + r')(?P<split>\.\d{2,4})(\s*(?:</[^>]+>)*\s*)$',
     re.IGNORECASE
 )
 
-# 2. Matches known extensions without split suffix preceded by delimiter, bracket, or domain suffix (.com, .in, etc.)
+# 2. Match ANY extension preceded by dot, space, underscore, hyphen, or bracket/quote
+# E.g. .mkv,  mkv, _mkv, -mkv, ]mkv, .avi,  avi, .ts,  ts, .mp4,  mp4
 DELIM_EXT_REGEX = re.compile(
-    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_>\'\"])|(?:\.(?:com|in|to|org|net|me|xyz|site|club|app|top|biz|info|cc)))(?P<ext>' + ALL_KNOWN_MEDIA_EXTS + r')(\s*(?:</[^>]+>)*\s*)$',
+    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_>\'\"]))(?P<ext>' + ALL_MEDIA_EXTS + r')(\s*(?:</[^>]+>)*\s*)$',
     re.IGNORECASE
 )
 
-# 3. Matches unambiguous video extensions at the very end even if glued to a word/domain (e.g. Commkv, ReleaseGroupmkv)
+# 3. Match unambiguous extensions even if glued directly to promo domain or letters (e.g. Commkv, Bollyflixmp4)
 UNAMBIGUOUS_TAIL_REGEX = re.compile(
     r'^(?P<stem>.*?)(?P<ext>' + UNAMBIGUOUS_EXTS + r')(\s*(?:</[^>]+>)*\s*)$',
     re.IGNORECASE
 )
 
-# 4. Generic fallback for any extension with a leading dot
-GENERIC_EXT_SPLIT_REGEX = re.compile(
+# 4. Generic fallback with dot
+GENERIC_EXT_REGEX = re.compile(
     r'^(?P<stem>.*?)(?P<ext>\.[a-zA-Z][a-zA-Z0-9]{1,4})(?P<split>\.\d{2,4})?(\s*(?:</[^>]+>)*\s*)$',
     re.IGNORECASE
 )
@@ -544,17 +545,18 @@ def parse_media_extension_and_split(text: str):
     if not m:
         m = UNAMBIGUOUS_TAIL_REGEX.search(text)
     if not m:
-        m = GENERIC_EXT_SPLIT_REGEX.search(text)
+        m = GENERIC_EXT_REGEX.search(text)
     if m:
         stem = m.group("stem")
         ext = m.group("ext")
-        if not ext.startswith("."):
+        if ext and not ext.startswith("."):
             ext = "." + ext.lower()
         split = m.groupdict().get("split") or ""
         closing = m.groups()[-1] if len(m.groups()) >= 4 and m.groups()[-1] else ""
-        # Strip trailing promotional domain residue from stem (e.g. .Com, .in, .org)
-        stem = re.sub(r'(?i)\.(?:com|in|to|org|net|me|xyz|site|club|app|top|biz|info|cc)$', '', stem)
-        return stem, ext, split, closing
+        if stem:
+            # Strip trailing promotional domain residue from stem (e.g. .Com, .in, .org)
+            stem = re.sub(r'(?i)\.(?:com|in|to|org|net|me|xyz|site|club|app|top|biz|info|cc)$', '', stem)
+        return stem or "", ext or "", split or "", closing or ""
     return text, "", "", ""
 
 # Quality regex: 2160p, 1080p, 720p, 480p, 360p, 1440p, 4k, 8k

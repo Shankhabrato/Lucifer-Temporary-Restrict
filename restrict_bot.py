@@ -509,22 +509,40 @@ def _build_promo_regex():
 
 PROMO_NAME_REGEX = _build_promo_regex()
 
-KNOWN_MEDIA_EXTS = r'mkv|mp4|avi|webm|mov|ts|m4v|flv|wmv|avc|mp3|aac|m4a|flac|wav|opus|ogg|zip|rar|7z|tar|iso|apk|pdf'
+UNAMBIGUOUS_EXTS = r'mkv|mp4|webm|m4v|flv|wmv|m4a|flac|7z'
+OTHER_EXTS = r'avi|ts|avc|mp3|aac|wav|opus|ogg|zip|rar|tar|iso|apk|pdf'
+ALL_KNOWN_MEDIA_EXTS = UNAMBIGUOUS_EXTS + r'|' + OTHER_EXTS
 
-# Regex to detect known media extension (with or without dot, space, underscore, or bracket) + optional split suffix
-KNOWN_EXT_SPLIT_REGEX = re.compile(
-    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_]))(?P<ext>' + KNOWN_MEDIA_EXTS + r')(?P<split>\.\d{2,4})?(\s*(?:</[^>]+>)*\s*)$',
+# 1. Matches with numeric split suffix like .001, .002 even if glued to words/promo (e.g. Commkv.001, ]mkv.001)
+SPLIT_EXT_REGEX = re.compile(
+    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_>\'\"a-zA-Z0-9]))(?P<ext>' + ALL_KNOWN_MEDIA_EXTS + r')(?P<split>\.\d{2,4})(\s*(?:</[^>]+>)*\s*)$',
     re.IGNORECASE
 )
 
-# Generic fallback for any other extension with a leading dot
+# 2. Matches known extensions without split suffix preceded by delimiter, bracket, or domain suffix (.com, .in, etc.)
+DELIM_EXT_REGEX = re.compile(
+    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_>\'\"])|(?:\.(?:com|in|to|org|net|me|xyz|site|club|app|top|biz|info|cc)))(?P<ext>' + ALL_KNOWN_MEDIA_EXTS + r')(\s*(?:</[^>]+>)*\s*)$',
+    re.IGNORECASE
+)
+
+# 3. Matches unambiguous video extensions at the very end even if glued to a word/domain (e.g. Commkv, ReleaseGroupmkv)
+UNAMBIGUOUS_TAIL_REGEX = re.compile(
+    r'^(?P<stem>.*?)(?P<ext>' + UNAMBIGUOUS_EXTS + r')(\s*(?:</[^>]+>)*\s*)$',
+    re.IGNORECASE
+)
+
+# 4. Generic fallback for any extension with a leading dot
 GENERIC_EXT_SPLIT_REGEX = re.compile(
     r'^(?P<stem>.*?)(?P<ext>\.[a-zA-Z][a-zA-Z0-9]{1,4})(?P<split>\.\d{2,4})?(\s*(?:</[^>]+>)*\s*)$',
     re.IGNORECASE
 )
 
 def parse_media_extension_and_split(text: str):
-    m = KNOWN_EXT_SPLIT_REGEX.search(text)
+    m = SPLIT_EXT_REGEX.search(text)
+    if not m:
+        m = DELIM_EXT_REGEX.search(text)
+    if not m:
+        m = UNAMBIGUOUS_TAIL_REGEX.search(text)
     if not m:
         m = GENERIC_EXT_SPLIT_REGEX.search(text)
     if m:
@@ -532,8 +550,10 @@ def parse_media_extension_and_split(text: str):
         ext = m.group("ext")
         if not ext.startswith("."):
             ext = "." + ext.lower()
-        split = m.group("split") or ""
-        closing = m.group(4) if len(m.groups()) >= 4 and m.group(4) else ""
+        split = m.groupdict().get("split") or ""
+        closing = m.groups()[-1] if len(m.groups()) >= 4 and m.groups()[-1] else ""
+        # Strip trailing promotional domain residue from stem (e.g. .Com, .in, .org)
+        stem = re.sub(r'(?i)\.(?:com|in|to|org|net|me|xyz|site|club|app|top|biz|info|cc)$', '', stem)
         return stem, ext, split, closing
     return text, "", "", ""
 
@@ -2738,6 +2758,15 @@ async def handle_private(client: Client, acc, message: Message, chatid, msgid: i
     )
 
     clean_caption = smart_caption(original_caption)
+    if not clean_caption.strip() and msg_type in ["Video", "Document", "Audio"]:
+        fallback_fn = (
+            getattr(getattr(msg, "document", None), "file_name", None) or
+            getattr(getattr(msg, "video", None), "file_name", None) or
+            getattr(getattr(msg, "audio", None), "file_name", None) or
+            ""
+        )
+        if fallback_fn:
+            clean_caption = smart_caption(fallback_fn)
 
     if text_format:
         if "Bold" in text_format:
@@ -3083,6 +3112,15 @@ async def process_watcher_message(client, message):
             )
 
             clean_caption = smart_caption(original_caption)
+            if not clean_caption.strip() and msg_type in ["Video", "Document", "Audio"]:
+                fallback_fn = (
+                    getattr(getattr(message, "document", None), "file_name", None) or
+                    getattr(getattr(message, "video", None), "file_name", None) or
+                    getattr(getattr(message, "audio", None), "file_name", None) or
+                    ""
+                )
+                if fallback_fn:
+                    clean_caption = smart_caption(fallback_fn)
 
             if text_format:
                 if "Bold" in text_format: clean_caption = f"<b>{clean_caption}</b>"
@@ -3119,7 +3157,7 @@ async def process_watcher_message(client, message):
                         if "CAPTION_TOO_LONG" in str(e2):
                             try:
                                 fallback_cap = prepare_caption_fallback(clean_caption, media_file_size)
-                                await client.copy_message(chat_id=dest_id, from_chat_id=chatid, message_id=message.id, reply_to_message_id=dest_thread, caption=fallback_cap, reply_markup=message.reply_markup)
+                                await client.copy_message(chat_id=dest_id, from_chat_id=chat_id, message_id=message.id, reply_to_message_id=dest_thread, caption=fallback_cap, reply_markup=message.reply_markup)
                                 success = True
                                 continue
                             except: pass

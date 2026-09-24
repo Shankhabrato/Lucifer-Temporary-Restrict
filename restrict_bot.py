@@ -602,7 +602,14 @@ PROMO_DOMAINS = [
     r'tinyurl\.com', r'cutt\.ly', r'shorturl\.at'
 ]
 PROMO_DOMAIN_REGEX = re.compile(r'https?://(?:[a-zA-Z0-9_-]+\.)*(?:' + '|'.join(PROMO_DOMAINS) + r')(?::\d+)?(?:/[^\s"\'>]*)?', re.IGNORECASE)
-PROMO_PHRASES_REGEX = re.compile(r'\b(?:join|subscribe|telegram|channel|group|backup|click here|download now|direct link|update channel|official)\b', re.IGNORECASE)
+PROMO_PHRASES_REGEX = re.compile(r'\b(?:join|subscribe|telegram|channel|group|backup|click here|download now|direct link|update channel|official|powered by|credit|credits|uploaded by|shared by)\b', re.IGNORECASE)
+
+PROMO_LINE_REGEX = re.compile(
+    r'(?i)^\s*(?:[⚜️✨🌟👉🔹🔸🔻🔺➡️✔️📢🔗]\s*)*'
+    r'(?:powered\s*by|uploaded\s*by|shared\s*by|posted\s*by|credits?|join|subscribe|telegram\s*channel|backup\s*channel|official\s*channel|main\s*channel|contact)'
+    r'(?:\s*[:\-–—]\s*|\s+).*$',
+    re.IGNORECASE
+)
 
 def clean_promotional_hyperlinks(text_html: str) -> str:
     if not text_html:
@@ -616,15 +623,16 @@ def clean_promotional_hyperlinks(text_html: str) -> str:
         is_promo_anchor = bool(PROMO_PHRASES_REGEX.search(anchor)) or bool(re.search(r'^@[a-zA-Z0-9_]+$', anchor))
 
         if is_promo_url or is_promo_anchor:
-            if is_promo_anchor and len(anchor.split()) <= 4:
-                return ""
-            return anchor
+            if re.search(r'\.(?:mkv|mp4|webm|avi|zip|rar)(?:\.\d{3})?$', anchor, re.IGNORECASE):
+                return anchor
+            return ""
         return anchor
 
     cleaned = LINK_PATTERN.sub(replace_link, text_html)
     cleaned = PROMO_DOMAIN_REGEX.sub("", cleaned)
     cleaned = re.sub(r'(?i)\b(?:join|link|channel|backup channel|official channel)\s*:\s*', '', cleaned)
     return cleaned
+
 
 def clean_promotional_names(text: str) -> str:
     if not text:
@@ -787,7 +795,23 @@ def smart_caption(text_html, file_size_bytes=0):
         else:
             lines = [clean_promotional_names(l.replace('_', ' ')) for l in lines]
 
-    result = '\n'.join(lines)
+    # Filter out promotional lines, raw @usernames, or empty punctuation lines
+    filtered_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if filtered_lines and filtered_lines[-1] != "":
+                filtered_lines.append("")
+            continue
+        if PROMO_LINE_REGEX.match(stripped):
+            continue
+        if re.match(r'^\s*@[a-zA-Z0-9_]+\s*$', stripped):
+            continue
+        if re.match(r'^[⚜️✨🌟👉🔹🔸🔻🔺➡️✔️📢🔗:\-\[\]\(\)\s]*$', stripped):
+            continue
+        filtered_lines.append(line)
+
+    result = '\n'.join(filtered_lines)
     result = re.sub(r' {2,}', ' ', result).strip()
     result = balance_html_tags(result)
     
@@ -796,6 +820,7 @@ def smart_caption(text_html, file_size_bytes=0):
         result = append_media_footer(result, file_size_bytes)
         
     return result
+
 
 
 async def check_link_restriction(user_id, link_text):

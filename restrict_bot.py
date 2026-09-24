@@ -509,8 +509,33 @@ def _build_promo_regex():
 
 PROMO_NAME_REGEX = _build_promo_regex()
 
-# Regex to detect true extension + numeric split suffix at the end of a string (with optional trailing closing HTML tags)
-EXT_SPLIT_REGEX = re.compile(r'^(?P<stem>.*?)(?P<ext>\.[a-zA-Z][a-zA-Z0-9]{1,4})(?P<split>\.\d{2,4})?(\s*(?:</[^>]+>)*\s*)$', re.IGNORECASE)
+KNOWN_MEDIA_EXTS = r'mkv|mp4|avi|webm|mov|ts|m4v|flv|wmv|avc|mp3|aac|m4a|flac|wav|opus|ogg|zip|rar|7z|tar|iso|apk|pdf'
+
+# Regex to detect known media extension (with or without dot, space, underscore, or bracket) + optional split suffix
+KNOWN_EXT_SPLIT_REGEX = re.compile(
+    r'^(?P<stem>.*?)(?:[\.\s_\-]+|(?<=[\)\]\}_]))(?P<ext>' + KNOWN_MEDIA_EXTS + r')(?P<split>\.\d{2,4})?(\s*(?:</[^>]+>)*\s*)$',
+    re.IGNORECASE
+)
+
+# Generic fallback for any other extension with a leading dot
+GENERIC_EXT_SPLIT_REGEX = re.compile(
+    r'^(?P<stem>.*?)(?P<ext>\.[a-zA-Z][a-zA-Z0-9]{1,4})(?P<split>\.\d{2,4})?(\s*(?:</[^>]+>)*\s*)$',
+    re.IGNORECASE
+)
+
+def parse_media_extension_and_split(text: str):
+    m = KNOWN_EXT_SPLIT_REGEX.search(text)
+    if not m:
+        m = GENERIC_EXT_SPLIT_REGEX.search(text)
+    if m:
+        stem = m.group("stem")
+        ext = m.group("ext")
+        if not ext.startswith("."):
+            ext = "." + ext.lower()
+        split = m.group("split") or ""
+        closing = m.group(4) if len(m.groups()) >= 4 and m.group(4) else ""
+        return stem, ext, split, closing
+    return text, "", "", ""
 
 # Quality regex: 2160p, 1080p, 720p, 480p, 360p, 1440p, 4k, 8k
 QUALITY_REGEX = re.compile(r'\b(2160p|1080p|720p|480p|360p|1440p|4k|8k)\b', re.IGNORECASE)
@@ -609,15 +634,8 @@ def sanitize_filename(filename: str) -> str:
     filename = re.sub(r'[:]', "-", filename)
     filename = re.sub(r'[\\/*?"<>|]', "", filename)
     
-    ext = ""
-    split_suffix = ""
-    m = EXT_SPLIT_REGEX.search(filename)
-    if m:
-        stem = m.group("stem")
-        ext = m.group("ext") or ""
-        split_suffix = m.group("split") or ""
-    else:
-        stem = filename
+    stem, ext, split_suffix, _ = parse_media_extension_and_split(filename)
+    if not ext:
         ext = ".dat"
 
     # Replace underscores with spaces
@@ -664,15 +682,13 @@ def smart_caption(text_html, file_size_bytes=0):
     text_html = re.sub(r'\n*\s*🔗\s*Join\s*@luciferdatabase[^\n]*', '', text_html, flags=re.IGNORECASE)
 
     # 2. Safely extract trailing true extension & split-suffix preserving HTML tags
-    ext = ""
-    split_suffix = ""
-    closing_tags = ""
-    m_ext = EXT_SPLIT_REGEX.search(text_html)
-    if m_ext:
-        text_html = m_ext.group("stem")
-        ext = m_ext.group("ext") or ""
-        split_suffix = m_ext.group("split") or ""
-        closing_tags = m_ext.group(4) or ""
+    stem, ext, split_suffix, closing_tags = parse_media_extension_and_split(text_html)
+    if ext:
+        text_html = stem
+    else:
+        ext = ""
+        split_suffix = ""
+        closing_tags = ""
 
     # 3. Replace all underscores with spaces
     text_html = text_html.replace('_', ' ')

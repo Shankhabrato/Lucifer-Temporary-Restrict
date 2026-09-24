@@ -621,18 +621,32 @@ def clean_promotional_hyperlinks(text_html: str) -> str:
     def replace_md_link(match):
         anchor = match.group(1).strip()
         href = match.group(2).strip()
-        is_promo_anchor = bool(PROMO_PHRASES_REGEX.search(anchor)) or bool(re.search(r'^@[a-zA-Z0-9_]+$', anchor))
+        plain_anchor = re.sub(r'<[^>]+>', '', anchor).strip()
+        cleaned_anchor = clean_promotional_names(plain_anchor).strip()
+        is_promo_anchor = (
+            bool(PROMO_PHRASES_REGEX.search(plain_anchor)) or 
+            bool(re.search(r'^@[a-zA-Z0-9_]+$', plain_anchor)) or
+            cleaned_anchor == "" or
+            bool(re.match(r'^[⚜️✨🌟👉🔹🔸🔻🔺➡️✔️📢🔗:\-\[\]\(\)\s\\/]*$', cleaned_anchor))
+        )
         if is_promo_anchor:
             return ""
         return anchor
 
-    text_html = MD_LINK_PATTERN.sub(replace_md_link, text_html)
+    text_html = re.compile(r'\[+([^\]]+)\]+\((https?://[^\)]+)\)').sub(replace_md_link, text_html)
 
     # 2. Unwrap HTML links <a href="url">anchor</a>
     def replace_html_link(match):
         href = match.group(1).strip()
         anchor = match.group(2).strip()
-        is_promo_anchor = bool(PROMO_PHRASES_REGEX.search(anchor)) or bool(re.search(r'^@[a-zA-Z0-9_]+$', anchor))
+        plain_anchor = re.sub(r'<[^>]+>', '', anchor).strip()
+        cleaned_anchor = clean_promotional_names(plain_anchor).strip()
+        is_promo_anchor = (
+            bool(PROMO_PHRASES_REGEX.search(plain_anchor)) or 
+            bool(re.search(r'^@[a-zA-Z0-9_]+$', plain_anchor)) or
+            cleaned_anchor == "" or
+            bool(re.match(r'^[⚜️✨🌟👉🔹🔸🔻🔺➡️✔️📢🔗:\-\[\]\(\)\s\\/]*$', cleaned_anchor))
+        )
         if is_promo_anchor:
             return ""
         return anchor
@@ -790,6 +804,7 @@ def smart_caption(text_html, file_size_bytes=0):
     # 2. Process multiline captions preserving formatting
     lines = text_html.split('\n')
     transformed = False
+    media_idx = -1
 
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -800,6 +815,7 @@ def smart_caption(text_html, file_size_bytes=0):
             leading = line[:len(line) - len(line.lstrip())]
             lines[i] = leading + new_line
             transformed = True
+            media_idx = i
             break
 
     if not transformed:
@@ -808,6 +824,10 @@ def smart_caption(text_html, file_size_bytes=0):
             lines = [new_text]
         else:
             lines = [clean_promotional_names(l.replace('_', ' ')) for l in lines]
+    else:
+        for j in range(len(lines)):
+            if j != media_idx:
+                lines[j] = clean_promotional_names(lines[j].replace('_', ' '))
 
     # Filter out promotional lines, raw @usernames, or empty punctuation lines
     filtered_lines = []
@@ -817,12 +837,26 @@ def smart_caption(text_html, file_size_bytes=0):
             if filtered_lines and filtered_lines[-1] != "":
                 filtered_lines.append("")
             continue
-        if PROMO_LINE_REGEX.match(stripped):
+
+        plain = re.sub(r'<[^>]+>', '', stripped).strip()
+        if not plain:
             continue
-        if re.match(r'^\s*@[a-zA-Z0-9_]+\s*$', stripped):
+
+        # Match promo line regex on plain text and after stripping leading emoji/bracket decorations
+        clean_prefix = re.sub(r'^[\[\(\s⚜️✨🌟👉🔹🔸🔻🔺➡️✔️📢🔗]+', '', plain)
+        if PROMO_LINE_REGEX.match(plain) or PROMO_LINE_REGEX.match(clean_prefix):
             continue
-        if re.match(r'^[⚜️✨🌟👉🔹🔸🔻🔺➡️✔️📢🔗:\-\[\]\(\)\s]*$', stripped):
+
+        if PROMO_DOMAIN_REGEX.search(plain) or re.search(r'(?i)\b(?:t\.me|telegram\.me)\b', plain):
             continue
+
+        if re.match(r'^\s*@[a-zA-Z0-9_]+\s*$', plain):
+            continue
+
+        cleaned_plain = clean_promotional_names(plain)
+        if re.match(r'^[⚜️✨🌟👉🔹🔸🔻🔺➡️✔️📢🔗:\-\[\]\(\)\s\\/]*$', cleaned_plain):
+            continue
+
         filtered_lines.append(line)
 
     result = '\n'.join(filtered_lines)

@@ -1,5 +1,9 @@
 <div align="center">
 
+<img src="./assets/logo.png" alt="Lucifer Morningstar Banner" width="100%" />
+
+<br><br>
+
 # 🜏 𝕃𝕌ℂ𝕀𝔽𝔼ℝ 𝕄𝕆ℝℕ𝕀ℕ𝔾𝕊𝕋𝔸ℝ
 
 ### ⚜️ Precision-Built Telegram Automation, Synchronisation & Media Processing Engine ⚜️

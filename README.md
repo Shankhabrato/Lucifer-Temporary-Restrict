@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/logo.png" alt="Lucifer Morningstar Banner" width="100%" />
+
 
 <br><br>
 
